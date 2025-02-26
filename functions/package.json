@@ -1,0 +1,22 @@
+{
+  "name": "functions",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@sendinblue/client": "^3.3.1",
+    "@stripe/stripe-js": "^5.7.0",
+    "firebase": "^11.3.1",
+    "firebase-admin": "^13.1.0",
+    "firebase-functions": "^6.3.2",
+    "nodemailer": "^6.10.0",
+    "react-router-dom": "^7.2.0",
+    "uuid": "^11.1.0"
+  }
+}

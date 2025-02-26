@@ -1,207 +1,122 @@
 // src/services/authService.js
-import { v4 as uuidv4 } from 'uuid';
+import { 
+  createUserWithEmailAndPassword, 
+  signInWithEmailAndPassword,
+  signOut,
+  sendPasswordResetEmail,
+  GoogleAuthProvider,
+  signInWithPopup,
+  updateProfile,
+  sendEmailVerification
+} from 'firebase/auth';
+import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
+import { auth, db } from '../firebase/config';
 
-// Simulate API delay
-const apiDelay = (ms = 600) => new Promise(resolve => setTimeout(resolve, ms));
-
-// Local storage keys
-const AUTH_TOKEN_KEY = 'lalaforms_auth_token';
-const USER_STORAGE_KEY = 'lalaforms_user';
-const USERS_STORAGE_KEY = 'lalaforms_users';
-
-// Get users from storage
-const getUsersFromStorage = () => {
-  const usersJson = localStorage.getItem(USERS_STORAGE_KEY);
-  return usersJson ? JSON.parse(usersJson) : [];
-};
-
-// Save users to storage
-const saveUsersToStorage = (users) => {
-  localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(users));
-};
-
-// Register a new user
-export const registerUser = async (name, email, password) => {
-  await apiDelay();
-  
-  const users = getUsersFromStorage();
-  
-  // Check if email is already in use
-  if (users.some(user => user.email === email)) {
-    throw new Error('Email is already in use');
+// User registration
+export const registerUser = async (email, password, displayName) => {
+  try {
+    // Create user with email and password
+    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+    const user = userCredential.user;
+    
+    // Update profile with display name
+    await updateProfile(user, { displayName });
+    
+    // Send email verification
+    await sendEmailVerification(user);
+    
+    // Create user document in Firestore
+    await setDoc(doc(db, 'users', user.uid), {
+      uid: user.uid,
+      email,
+      displayName,
+      createdAt: serverTimestamp(),
+      planType: 'free',
+      usage: {
+        forms: 0,
+        submissions: 0,
+        lastBillingCycle: serverTimestamp()
+      }
+    });
+    
+    return user;
+  } catch (error) {
+    throw error;
   }
-  
-  // Create new user
-  const newUser = {
-    id: uuidv4(),
-    name,
-    email,
-    password, // In a real app, the password would be hashed
-    createdAt: new Date().toISOString(),
-    isPro: false,
-    planType: 'free'
-  };
-  
-  users.push(newUser);
-  saveUsersToStorage(users);
-  
-  // Save user info to local storage
-  const { password: _, ...userWithoutPassword } = newUser;
-  localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(userWithoutPassword));
-  
-  // Generate and save auth token
-  const token = uuidv4();
-  localStorage.setItem(AUTH_TOKEN_KEY, token);
-  
-  return userWithoutPassword;
 };
 
-// Login user
+// User login
 export const loginUser = async (email, password) => {
-  await apiDelay();
-  
-  const users = getUsersFromStorage();
-  
-  // Find user by email
-  const user = users.find(user => user.email === email);
-  
-  if (!user || user.password !== password) {
-    throw new Error('Invalid email or password');
+  try {
+    const userCredential = await signInWithEmailAndPassword(auth, email, password);
+    return userCredential.user;
+  } catch (error) {
+    throw error;
   }
-  
-  // Save user info to local storage
-  const { password: _, ...userWithoutPassword } = user;
-  localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(userWithoutPassword));
-  
-  // Generate and save auth token
-  const token = uuidv4();
-  localStorage.setItem(AUTH_TOKEN_KEY, token);
-  
-  return userWithoutPassword;
 };
 
-// Logout user
+// Google sign-in
+export const signInWithGoogle = async () => {
+  try {
+    const provider = new GoogleAuthProvider();
+    const userCredential = await signInWithPopup(auth, provider);
+    const user = userCredential.user;
+    
+    // Check if user document exists
+    const userDoc = await getDoc(doc(db, 'users', user.uid));
+    
+    // If not, create one
+    if (!userDoc.exists()) {
+      await setDoc(doc(db, 'users', user.uid), {
+        uid: user.uid,
+        email: user.email,
+        displayName: user.displayName,
+        createdAt: serverTimestamp(),
+        planType: 'free',
+        usage: {
+          forms: 0,
+          submissions: 0,
+          lastBillingCycle: serverTimestamp()
+        }
+      });
+    }
+    
+    return user;
+  } catch (error) {
+    throw error;
+  }
+};
+
+// Logout
 export const logoutUser = async () => {
-  await apiDelay();
-  
-  // Clear auth token and user info from local storage
-  localStorage.removeItem(AUTH_TOKEN_KEY);
-  localStorage.removeItem(USER_STORAGE_KEY);
-  
-  return { success: true };
+  try {
+    await signOut(auth);
+  } catch (error) {
+    throw error;
+  }
 };
 
-// Get current user
-export const getCurrentUser = async () => {
-  await apiDelay();
-  
-  // Check if auth token exists
-  const token = localStorage.getItem(AUTH_TOKEN_KEY);
-  
-  if (!token) {
-    return null;
+// Password reset
+export const resetPassword = async (email) => {
+  try {
+    await sendPasswordResetEmail(auth, email);
+  } catch (error) {
+    throw error;
   }
-  
-  // Get user info from local storage
-  const userJson = localStorage.getItem(USER_STORAGE_KEY);
-  
-  if (!userJson) {
-    return null;
-  }
-  
-  return JSON.parse(userJson);
 };
 
-// Update user profile
-export const updateUserProfile = async (userId, userData) => {
-  await apiDelay();
+// Get current user profile with Firestore data
+export const getCurrentUserProfile = async () => {
+  const user = auth.currentUser;
+  if (!user) return null;
   
-  const users = getUsersFromStorage();
-  const userIndex = users.findIndex(user => user.id === userId);
-  
-  if (userIndex === -1) {
-    throw new Error('User not found');
-  }
-  
-  // Update user data
-  users[userIndex] = {
-    ...users[userIndex],
-    ...userData,
-    updatedAt: new Date().toISOString()
-  };
-  
-  saveUsersToStorage(users);
-  
-  // Update user info in local storage if it exists
-  const currentUserJson = localStorage.getItem(USER_STORAGE_KEY);
-  
-  if (currentUserJson) {
-    const currentUser = JSON.parse(currentUserJson);
-    
-    if (currentUser.id === userId) {
-      const { password: _, ...userWithoutPassword } = users[userIndex];
-      localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(userWithoutPassword));
+  try {
+    const userDoc = await getDoc(doc(db, 'users', user.uid));
+    if (userDoc.exists()) {
+      return { ...user, ...userDoc.data() };
     }
+    return user;
+  } catch (error) {
+    throw error;
   }
-  
-  return { success: true };
-};
-
-// Change password
-export const changePassword = async (userId, currentPassword, newPassword) => {
-  await apiDelay();
-  
-  const users = getUsersFromStorage();
-  const userIndex = users.findIndex(user => user.id === userId);
-  
-  if (userIndex === -1) {
-    throw new Error('User not found');
-  }
-  
-  // Verify current password
-  if (users[userIndex].password !== currentPassword) {
-    throw new Error('Current password is incorrect');
-  }
-  
-  // Update password
-  users[userIndex].password = newPassword;
-  users[userIndex].updatedAt = new Date().toISOString();
-  
-  saveUsersToStorage(users);
-  
-  return { success: true };
-};
-
-// Upgrade to Pro
-export const upgradeToPro = async (userId, planType) => {
-  await apiDelay();
-  
-  const users = getUsersFromStorage();
-  const userIndex = users.findIndex(user => user.id === userId);
-  
-  if (userIndex === -1) {
-    throw new Error('User not found');
-  }
-  
-  // Update user plan
-  users[userIndex].isPro = true;
-  users[userIndex].planType = planType; // 'monthly' or 'yearly'
-  users[userIndex].planStartDate = new Date().toISOString();
-  users[userIndex].updatedAt = new Date().toISOString();
-  
-  saveUsersToStorage(users);
-  
-  // Update user info in local storage if it exists
-  const currentUserJson = localStorage.getItem(USER_STORAGE_KEY);
-  
-  if (currentUserJson) {
-    const currentUser = JSON.parse(currentUserJson);
-    
-    if (currentUser.id === userId) {
-      const { password: _, ...userWithoutPassword } = users[userIndex];
-      localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(userWithoutPassword));
-    }
-  }
-  
-  return { success: true };
 };

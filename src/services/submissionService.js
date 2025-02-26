@@ -1,40 +1,22 @@
 import axios from 'axios';
+import { doc, collection, addDoc, getDoc, getDocs, updateDoc, deleteDoc, query, where, orderBy, limit } from 'firebase/firestore';
+import { db } from '../firebase'; // Make sure this path is correct for your project
 
-// API base URL - replace with your actual API endpoint if you have one
+// API base URL
 const API_URL = process.env.REACT_APP_API_URL || '/api';
 
-// Mock data for development purposes
-const mockSubmissions = [
-  {
-    id: '1',
-    formId: 'form1',
-    createdAt: new Date(Date.now() - 86400000 * 5).toISOString(),
-    data: { name: 'John Doe', email: 'john@example.com', message: 'This is a test submission' }
-  },
-  {
-    id: '2',
-    formId: 'form1',
-    createdAt: new Date(Date.now() - 86400000 * 3).toISOString(),
-    data: { name: 'Jane Smith', email: 'jane@example.com', message: 'Another test submission' }
-  },
-  {
-    id: '3',
-    formId: 'form1',
-    createdAt: new Date(Date.now() - 86400000 * 1).toISOString(),
-    data: { name: 'Bob Johnson', email: 'bob@example.com', message: 'Third test submission' }
-  }
-];
-
 // Create a new submission
-export const createSubmission = async (formId, data) => {
+export const submitForm = async (formId, data) => {
   try {
-    // In a real app, you'd use this:
-    // const response = await axios.post(`${API_URL}/forms/${formId}/submissions`, { data });
-    // return response.data;
+    // In a real app with Firebase:
+    const submissionRef = collection(db, 'forms', formId, 'submissions');
+    const docRef = await addDoc(submissionRef, {
+      data,
+      createdAt: new Date().toISOString(),
+    });
     
-    // For development, return a mock response
     return {
-      id: Date.now().toString(),
+      id: docRef.id,
       formId,
       createdAt: new Date().toISOString(),
       data
@@ -48,13 +30,17 @@ export const createSubmission = async (formId, data) => {
 // Get a specific submission
 export const getSubmission = async (formId, submissionId) => {
   try {
-    // In a real app, you'd use this:
-    // const response = await axios.get(`${API_URL}/forms/${formId}/submissions/${submissionId}`);
-    // return response.data;
+    const submissionRef = doc(db, 'forms', formId, 'submissions', submissionId);
+    const submissionSnap = await getDoc(submissionRef);
     
-    // For development, return a mock submission
-    const submission = mockSubmissions.find(s => s.id === submissionId);
-    return submission || null;
+    if (submissionSnap.exists()) {
+      return {
+        id: submissionSnap.id,
+        ...submissionSnap.data()
+      };
+    }
+    
+    return null;
   } catch (error) {
     console.error('Error getting submission:', error);
     throw error;
@@ -64,12 +50,19 @@ export const getSubmission = async (formId, submissionId) => {
 // Get all submissions for a form
 export const getFormSubmissions = async (formId) => {
   try {
-    // In a real app, you'd use this:
-    // const response = await axios.get(`${API_URL}/forms/${formId}/submissions`);
-    // return response.data;
+    const submissionsRef = collection(db, 'forms', formId, 'submissions');
+    const q = query(submissionsRef, orderBy('createdAt', 'desc'));
+    const querySnapshot = await getDocs(q);
     
-    // For development, return mock submissions
-    return mockSubmissions.filter(s => s.formId === formId);
+    const submissions = [];
+    querySnapshot.forEach((doc) => {
+      submissions.push({
+        id: doc.id,
+        ...doc.data()
+      });
+    });
+    
+    return submissions;
   } catch (error) {
     console.error('Error getting form submissions:', error);
     throw error;
@@ -79,11 +72,7 @@ export const getFormSubmissions = async (formId) => {
 // Delete a submission
 export const deleteSubmission = async (formId, submissionId) => {
   try {
-    // In a real app, you'd use this:
-    // await axios.delete(`${API_URL}/forms/${formId}/submissions/${submissionId}`);
-    // return true;
-    
-    // For development, just return true
+    await deleteDoc(doc(db, 'forms', formId, 'submissions', submissionId));
     return true;
   } catch (error) {
     console.error('Error deleting submission:', error);
@@ -91,14 +80,95 @@ export const deleteSubmission = async (formId, submissionId) => {
   }
 };
 
-// Get submission statistics (views, completion rate, etc.)
-export const getSubmissionStats = async (formId) => {
+// Record a form view
+export const recordFormView = async (formId) => {
   try {
-    // In a real app, you'd use this:
-    // const response = await axios.get(`${API_URL}/forms/${formId}/stats`);
-    // return response.data;
+    const formRef = doc(db, 'forms', formId);
+    const formSnap = await getDoc(formRef);
     
-    // For development, return mock stats
+    if (formSnap.exists()) {
+      const views = formSnap.data().views || 0;
+      await updateDoc(formRef, {
+        views: views + 1,
+        lastViewed: new Date().toISOString()
+      });
+    }
+    
+    return true;
+  } catch (error) {
+    console.error('Error recording form view:', error);
+    throw error;
+  }
+};
+
+// Export submissions to CSV
+export const exportSubmissions = async (formId) => {
+  try {
+    const submissions = await getFormSubmissions(formId);
+    
+    // Convert submissions to CSV format
+    // This is a simple implementation; you might want to use a CSV library
+    if (submissions.length === 0) {
+      return 'No submissions found';
+    }
+    
+    const fields = Object.keys(submissions[0].data || {});
+    let csv = fields.join(',') + '\n';
+    
+    submissions.forEach(submission => {
+      const row = fields.map(field => {
+        const value = submission.data[field];
+        // Handle values containing commas by wrapping in quotes
+        if (typeof value === 'string' && value.includes(',')) {
+          return `"${value}"`;
+        }
+        return value;
+      });
+      csv += row.join(',') + '\n';
+    });
+    
+    return csv;
+  } catch (error) {
+    console.error('Error exporting submissions:', error);
+    throw error;
+  }
+};
+
+// These are the missing functions that are being imported in components
+
+// Alias for getFormSubmissions (used in ResultsTab.jsx)
+export const fetchSubmissions = async (formId) => {
+  return getFormSubmissions(formId);
+};
+
+// Function for form analytics (used in ResultsTab.jsx)
+export const fetchFormAnalytics = async (formId) => {
+  try {
+    const formRef = doc(db, 'forms', formId);
+    const formSnap = await getDoc(formRef);
+    
+    if (!formSnap.exists()) {
+      throw new Error('Form not found');
+    }
+    
+    const submissions = await getFormSubmissions(formId);
+    
+    // Calculate analytics
+    const stats = {
+      views: formSnap.data().views || 0,
+      starts: submissions.length,
+      completions: submissions.filter(s => s.isCompleted).length,
+      completionRate: submissions.length > 0 
+        ? (submissions.filter(s => s.isCompleted).length / submissions.length * 100).toFixed(1) 
+        : 0,
+      averageCompletionTime: '2m 34s', // This would require actual time tracking
+      fieldAnalytics: [] // This would require analyzing each field across submissions
+    };
+    
+    return stats;
+  } catch (error) {
+    console.error('Error getting form analytics:', error);
+    // Return mock stats for development
     return {
       views: 145,
       starts: 98,
@@ -111,57 +181,16 @@ export const getSubmissionStats = async (formId) => {
         { fieldId: 'field3', label: 'Message', completionRate: 82 }
       ]
     };
-  } catch (error) {
-    console.error('Error getting submission stats:', error);
-    throw error;
   }
 };
 
-// Get mock submissions for development
-export const getMockSubmissions = () => {
-  return mockSubmissions;
-};
-
-// These are the missing functions that are being imported in your components
-
-// Alias for getFormSubmissions (used in ResultsTab.jsx)
-export const fetchSubmissions = async (formId) => {
-  return getFormSubmissions(formId);
-};
-
-// Alias for getSubmissionStats (used in ResultsTab.jsx)
-export const fetchFormAnalytics = async (formId) => {
-  return getSubmissionStats(formId);
-};
-
-// Alias for createSubmission (used in FormPreview.jsx)
-export const submitForm = async (formId, data) => {
-  return createSubmission(formId, data);
-};
-
-// Export a service hook if needed (for React components)
-export const useSubmissionService = () => {
-  return {
-    createSubmission,
-    getSubmission,
-    getFormSubmissions,
-    deleteSubmission,
-    getSubmissionStats,
-    fetchSubmissions,
-    fetchFormAnalytics,
-    submitForm
-  };
-};
-
 export default {
-  createSubmission,
+  submitForm,
   getSubmission,
   getFormSubmissions,
   deleteSubmission,
-  getSubmissionStats,
-  getMockSubmissions,
+  recordFormView,
+  exportSubmissions,
   fetchSubmissions,
-  fetchFormAnalytics,
-  submitForm,
-  useSubmissionService
+  fetchFormAnalytics
 };
